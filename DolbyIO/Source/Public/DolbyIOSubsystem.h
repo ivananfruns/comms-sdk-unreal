@@ -186,6 +186,37 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dolby.io Comms")
 	void ChangeScreenshareContentType(EDolbyIOScreenshareContentType ContentType);
 
+	/** Gets the names of the audio devices of the user
+	 *
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dolby.io Comms")
+	void GetAudioDevices(TArray<FString>& InputDevices, TArray<FString>& outputDevices, FString& inputDevice,
+	                     FString& outputDevice);
+
+	///** Gets the names of the cam devices of the user
+	// *
+	// */
+	//UFUNCTION(BlueprintCallable, Category = "Dolby.io Comms")
+	//void GetWebcamDevices(TArray<FString>& camDevices, FString& currentDevice);
+
+	/** sets the webcamera device of the user
+	 *
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dolby.io Comms")
+	void SetWebcamDevice(FString deviceName);
+
+	/** sets the input audio device of the user
+	 *
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dolby.io Comms")
+	bool SetInputAudioDevice(FString deviceName);
+
+	/** sets the output audio device of the user
+	 *
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dolby.io Comms")
+	bool SetOutputAudioDevice(FString deviceName);
+
 	/** Updates the location of the listener for spatial audio purposes.
 	 *
 	 * Calling this function even once disables the default behavior, which is to automatically use the location of the

@@ -166,12 +166,13 @@ void UDolbyIOSubsystem::Initialize(const FString& Token)
 				            const FString ParticipantID = ToFString(Event.track.peer_id);
 				            const FString StreamID = ToFString(Event.track.stream_id);
 				            DLB_UE_LOG("Video track added: ParticipantID=%s StreamID=%s", *ParticipantID, *StreamID);
-				            VideoSinks.Emplace(ParticipantID, std::make_shared<FVideoSink>());
+				            VideoSinks.Emplace(StreamID, std::make_shared<FVideoSink>()); //changed to set StreamID as Key
+
 				            Sdk->video()
 				                .remote()
-				                .set_video_sink(Event.track, VideoSinks[ParticipantID])
+				                .set_video_sink(Event.track, VideoSinks[StreamID]) //added with streamID
 				                .on_error(MAKE_DLB_ERROR_HANDLER);
-				            BroadcastEvent(OnVideoTrackAdded, ParticipantID);
+				            BroadcastEvent(OnVideoTrackAdded, StreamID); //pass streamID
 			            }
 		            });
 	        })
@@ -186,8 +187,8 @@ void UDolbyIOSubsystem::Initialize(const FString& Token)
 				            const FString ParticipantID = ToFString(Event.track.peer_id);
 				            const FString StreamID = ToFString(Event.track.stream_id);
 				            DLB_UE_LOG("Video track removed: ParticipantID=%s StreamID=%s", *ParticipantID, *StreamID);
-				            VideoSinks.Remove(ParticipantID);
-				            BroadcastEvent(OnVideoTrackRemoved, ParticipantID);
+				            VideoSinks.Remove(StreamID); //changed to remove videos by StreamID
+				            BroadcastEvent(OnVideoTrackRemoved, StreamID); //pass streamID
 			            }
 		            });
 	        })
@@ -576,6 +577,201 @@ void UDolbyIOSubsystem::UnbindMaterial(UMaterialInstanceDynamic* Material, const
 	{
 		(*Sink)->UnbindMaterial(Material);
 	}
+}
+
+
+void UDolbyIOSubsystem::GetAudioDevices(TArray<FString>& InputDevices, TArray<FString>& outputDevices,
+                                        FString& inputDevice, FString& outputDevice)
+{
+	// Invoking the method directly requires chaining successive operations
+	// via the `then` call
+	if (Sdk.IsValid())
+	{
+		Sdk->device_management()
+		    .get_audio_devices()
+		    .then(
+		        [&, this](std::vector<dolbyio::comms::dvc_device>&& dev)
+		        {
+			        for (int i = 0; i < dev.size(); i++)
+			        {
+				        if (dev[i].direction() == 1)
+					        InputDevices.Add(dev[i].name().c_str());
+				        if (dev[i].direction() == 2)
+					        outputDevices.Add(dev[i].name().c_str());
+			        }
+			        // DevicesGathered.Broadcast();
+		        })
+		    .on_error(
+		        [this](auto&& e)
+		        {
+			        // Handles exception
+			        DLB_UE_LOG("No devices found dolby");
+		        });
+
+		Sdk->device_management()
+		    .get_current_audio_input_device()
+		    .then(
+		        [&, this](std::optional<dolbyio::comms::dvc_device>&& currentDevice)
+		        {
+			        inputDevice = currentDevice.value().name().c_str();
+		        })
+		    .on_error(
+		        [](auto&& e)
+		        {
+			        // Currently no audio input device set
+		        });
+		Sdk->device_management()
+		    .get_current_audio_output_device()
+		    .then(
+		        [&, this](std::optional<dolbyio::comms::dvc_device>&& currentDevice)
+		        {
+			        outputDevice = currentDevice.value().name().c_str();
+		        })
+		    .on_error(
+		        [](auto&& e)
+		        {
+			        // Currently no audio input device set
+		        });
+	}
+	else
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("SDK is not valid"));
+	}
+}
+
+bool UDolbyIOSubsystem::SetInputAudioDevice(FString deviceName)
+{
+	// Invoking the method directly requires chaining successive operations
+	// via the `then` call
+	Sdk->device_management()
+	    .get_audio_devices()
+	    .then(
+	        [=](std::vector<dolbyio::comms::dvc_device>&& AllDevices)
+	        {
+		        // We first look if the device exists
+		        int foundIndex = -1;
+		        for (int i = 0; i < AllDevices.size(); i++)
+		        {
+
+			        FString devNameTemp = AllDevices[i].name().c_str();
+			        if (devNameTemp == deviceName)
+			        {
+				        foundIndex = i;
+			        }
+		        }
+		        if (foundIndex != -1) // if we have found the device then we call to the sdk set device
+		        {
+			        GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("Found device"));
+			        dolbyio::comms::dvc_device dolbyDevice(AllDevices[foundIndex]);
+			        Sdk->device_management()
+			            .set_preferred_input_audio_device(dolbyDevice)
+			            .then(
+			                [&, this]()
+			                {
+				                // device is now set
+				                // GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("Device Set"));
+				                return true;
+			                })
+			            .on_error(
+			                [this](auto&& e)
+			                {
+				                // Handles not being able to set the device
+				                // GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("couldnt set this
+				                // device"));
+				                return false;
+			                });
+		        }
+		        else
+		        {
+			        GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("didnt find device"));
+		        }
+	        })
+	    .on_error(
+	        [this](auto&& e)
+	        {
+		        // Handles not being able to gather devices
+		        DLB_UE_LOG("No devices found dolby");
+	        });
+	return false;
+}
+
+void UDolbyIOSubsystem::SetWebcamDevice(FString deviceName)
+{
+	// if (Sdk.IsValid())
+	//{
+	//	Sdk->device_management().get_video_devices()
+	//		.then([&, this](std::vector<dolbyio::comms::camera_device>&& dev) {
+	//		for (int i = 0; i < dev.size(); i++)
+	//		{
+	//			if (deviceName == dev[i].display_name.c_str())
+	//			{
+	//				//Sdk->device_management().set_video_device(dev[i]); //no hay este metodo
+	//			}
+	//		}
+	//			})
+	//		.on_error([this](auto&& e) {
+	//				// Handles exception
+	//				DLB_UE_LOG("No devices found dolby");
+	//			});
+	// }
+	// else {
+	//	GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("SDK is not valid"));
+	// }
+}
+
+bool UDolbyIOSubsystem::SetOutputAudioDevice(FString deviceName)
+{
+	// Invoking the method directly requires chaining successive operations
+	// via the `then` call
+	Sdk->device_management()
+	    .get_audio_devices()
+	    .then(
+	        [=](std::vector<dolbyio::comms::dvc_device>&& AllDevices)
+	        {
+		        // We first look if the device exists
+		        int foundIndex = -1;
+		        for (int i = 0; i < AllDevices.size(); i++)
+		        {
+
+			        FString devNameTemp = AllDevices[i].name().c_str();
+			        if (devNameTemp == deviceName)
+			        {
+				        foundIndex = i;
+			        }
+		        }
+		        if (foundIndex != -1) // if we have found the device then we call to the sdk set device
+		        {
+			        dolbyio::comms::dvc_device dolbyDevice(AllDevices[foundIndex]);
+			        Sdk->device_management()
+			            .set_preferred_output_audio_device(dolbyDevice)
+			            .then(
+			                [&, this]()
+			                {
+				                GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("device set"));
+				                // device is now set
+				                return true;
+			                })
+			            .on_error(
+			                [this](auto&& e)
+			                {
+				                // Handles not being able to set the device
+				                // GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("couldnt set this
+				                // device"));
+				                return false;
+			                });
+		        }
+		        else
+		        {
+			        GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, TEXT("didnt find device"));
+		        }
+	        })
+	    .on_error(
+	        [this](auto&& e)
+	        {
+		        // Handles not being able to gather devices
+		        DLB_UE_LOG("No devices found dolby");
+	        });
+	return false;
 }
 
 void UDolbyIOSubsystem::SetLocalPlayerLocation(const FVector& Location)
